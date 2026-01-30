@@ -6,7 +6,7 @@ data <- readr::read_delim("https://raw.githubusercontent.com/emanueleg/lora-rssi
                    delim = ";", escape_double = FALSE, trim_ws = TRUE) |> 
   mutate(timestamp=as.POSIXct(timestamp, tz="GMT",
                               origin="1970-01-01 00:00:00"),
-         hum=hum/100)
+         hum=hum/100) # available at https://github.com/emanueleg/lora-rssi/blob/master/vineyard-2021_data/combined_hourly_data.csv
 #
 n<-round(dim(data)[1]*.8)-149
 data<-data[830:1870,]
