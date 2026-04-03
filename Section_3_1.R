@@ -1,17 +1,16 @@
-rm(list = ls())
 library(forecast)
-library(tidyverse)
+library(ggplot2)
 library(BTSR)
 source("ubxiiarma.fit.r")
 source("best.ubxiiarma.r")
 ######################
 ## Data preparation ##
 ######################
-data <- readr::read_delim("combined_hourly_data.csv", 
-                          delim = ";", escape_double = FALSE, trim_ws = TRUE) %>% 
-  mutate(timestamp=as.POSIXct(timestamp, tz="GMT",
+data <- readr::read_delim("https://raw.githubusercontent.com/emanueleg/lora-rssi/master/vineyard-2021_data/combined_hourly_data.csv", 
+                          delim = ";", escape_double = FALSE, trim_ws = TRUE) |> 
+  dplyr::mutate(timestamp=as.POSIXct(timestamp, tz="GMT",
                               origin="1970-01-01 00:00:00"),
-         hum=hum/100)
+         hum=hum/100) # available at https://github.com/emanueleg/lora-rssi/blob/master/vineyard-2021_data/combined_hourly_data.csv
 
 data<-data[830:1870,] # only winter
 n<-round(dim(data)[1]*.8)
@@ -24,17 +23,6 @@ colnames(datatrain)<-paste0(colnames(datatrain),"_train")
 
 datatest<-cbind(data[(n+1):(dim(data)[1]),])  
 colnames(datatest)<-paste0(colnames(datatest),"_test")
-
-datatrain$RSSI_03_train[is.na(datatrain$RSSI_03_train)]<-
-  mean(na.omit(datatrain$RSSI_03_train))
-datatrain$RSSI_04_train[is.na(datatrain$RSSI_04_train)]<-
-  mean(na.omit(datatrain$RSSI_04_train))
-datatrain$RSSI_05_train[is.na(datatrain$RSSI_05_train)]<-
-  mean(na.omit(datatrain$RSSI_05_train))
-datatrain$RSSI_06_train[is.na(datatrain$RSSI_06_train)]<-
-  mean(na.omit(datatrain$RSSI_06_train))
-datatrain$RSSI_08_train[is.na(datatrain$RSSI_08_train)]<-
-  mean(na.omit(datatrain$RSSI_08_train))
 
 suppressMessages(attach(datatrain))
 suppressMessages(attach(datatest))
@@ -60,6 +48,12 @@ table.stationarity<-data.frame(
   `p-value KPSS`=c(kpss.level$p.value,kpss.diff$p.value)
 )
 
+# ACF and PACF of the differenced time series
+acf((hum_train), main ="")
+pacf((hum_train), main ="")
+acf(diff(hum_train), main ="")
+pacf(diff(hum_train), main ="")
+
 ########################
 ## Fitting the models ##
 ########################
@@ -68,6 +62,12 @@ a01<-auto.arima(hum_train, allowdrift = F)
 new1<-Arima(hum_test,model=a01) #one-step-ahead
 a02<-auto.arima(hum_train, xreg = X,allowdrift = F)
 new2<-Arima(hum_test,xreg = Xtest,model=a02) #one-step-ahead
+
+# fiting the SARIMA
+s01<-auto.arima(ts(hum_train,frequency = 24), allowdrift = F)
+snew1<-Arima(hum_test,model=s01) #one-step-ahead
+s02<-auto.arima(ts(hum_train,frequency = 24), xreg = X,allowdrift = F)
+snew2<-Arima(hum_test,xreg = Xtest,model=s02) #one-step-ahead
 
 # fiting the unit ARMA
 quant<-.5
@@ -83,19 +83,19 @@ for(i in 0:3){
                                          report=F))
     karma<-summary(karma1)
     uwarma1<-(UWARFIMA.fit(hum_train,p=i,d=F,q=j,info=T,rho=quant,
-                             report=F))
+                           report=F))
     uwarma<-summary(uwarma1)
     barmax<-summary(BARFIMA.fit(hum_train,p=i,d=F,q=j,info=T,
                                 xreg = X,
                                 report=F))
     karmax1<-suppressWarnings(KARFIMA.fit(hum_train,p=i,d=F,q=j,info=T,
-                          xreg = X,rho=quant,
-                          control = list(method="Nelder-Mead",stopcr=1e-2),
-                          report=F))
+                                          xreg = X,rho=quant,
+                                          control = list(method="Nelder-Mead",stopcr=1e-2),
+                                          report=F))
     karmax<-summary(karmax1)
     uwarmax1<-suppressWarnings(UWARFIMA.fit(hum_train,p=i,d=F,q=j,info=T,
-                                  rho=quant, xreg = X,
-                                  report=F))
+                                            rho=quant, xreg = X,
+                                            report=F))
     uwarmax<-summary(uwarmax1)
     if(karma1$convergence==1 || is.nan(karma$aic)==1) karma$aic=0
     if(karmax1$convergence==1 || is.nan(karmax$aic)==1) karmax$aic=0
@@ -108,12 +108,12 @@ for(i in 0:3){
 }
 order<-order[-1,]
 
-# ubxiix_best <- best.ubxii(hum_train, 
+# ubxiix_best <- best.ubxii(hum_train,
 #                          sf = c(start = c(2020,356*24), frequency = 24*366),
 #                          pmax = 3, qmax = 3,h=0,
 #                          nbest = 1,X=X,X_hat = 0)
 # 
-# ubxii_best <- best.ubxii(hum_train, 
+# ubxii_best <- best.ubxii(hum_train,
 #                         sf = c(start = c(2020,356*24), frequency = 24*366),
 #                         pmax = 3, qmax = 3,
 #                         nbest = 1)
@@ -131,7 +131,7 @@ orbxiiarma<-c(1,2)
 names_rows<-c("BARMAX","KARMAX","UWARMAX",
               "UBXII-ARMAX","ARIMAX",
               "BARMA","KARMA","UWARMA",
-              "UBXII-ARMAX","ARIMA")
+              "UBXII-ARMA","SARIMA")
 
 barmax<-BARFIMA.fit(hum_train,p=orbarmax[1],d=F,q=orbarmax[2],
                     xreg=X,info=T,report=F)
@@ -141,7 +141,7 @@ karmax<-KARFIMA.fit(hum_train,p=orkarmax[1],d=F,q=orkarmax[2],rho=quant,
 uwarmax<-UWARFIMA.fit(hum_train,p=oruwarmax[1],d=F,q=oruwarmax[2],rho=quant,
                       xreg=X,info=T,report=F)
 ubxiiarmax<-ubxiiarma.fit(ts(hum_train),ar=1:3,ma=NA,
-                         X=X,X_hat = 0,h=0)
+                          X=X,X_hat = 0,h=0)
 barma<-BARFIMA.fit(hum_train,p=orbarma[1],d=F,q=orbarma[2],
                    info=T,report=F)
 karma<-KARFIMA.fit(hum_train,p=orkarma[1],d=F,q=orkarma[2],rho=quant,
@@ -155,24 +155,27 @@ barmax_coeff<-t(summary(barmax)$coefficients[,c(1,4)])
 karmax_coeff<-t(summary(karmax)$coefficients[,c(1,4)])
 uwarmax_coeff<-t(summary(uwarmax)$coefficients[,c(1,4)])
 ubxiiarmax_coeff<-t(ubxiiarmax$model[,c(1,4)])
+sarimax_coeff<-t(lmtest::coeftest(s02)[,c(1,4)])
 arimax_coeff<-t(lmtest::coeftest(a02)[,c(1,4)])
 barma_coeff<-t(summary(barma)$coefficients[,c(1,4)])
 karma_coeff<-t(summary(karma)$coefficients[,c(1,4)])
 uwarma_coeff<-t(summary(uwarma)$coefficients[,c(1,4)])
-arima_coeff<-t(lmtest::coeftest(a01)[,c(1,4)])
 ubxiiarma_coeff<-t(ubxiiarma$model[,c(1,4)])
+sarima_coeff<-t(lmtest::coeftest(s01)[,c(1,4)])
+arima_coeff<-t(lmtest::coeftest(a01)[,c(1,4)])
 
-
-xtable::xtable(round(barmax_coeff,4))
-xtable::xtable(round(karmax_coeff,4))
-xtable::xtable(round(uwarmax_coeff,4))
-xtable::xtable(round(ubxiiarmax_coeff,4))
-xtable::xtable(round(arimax_coeff[,c(5,1:4)],4))
-xtable::xtable(round(barma_coeff,4))
-xtable::xtable(round(karma_coeff,4))
-xtable::xtable(uwarma_coeff, digits = 4)
-xtable::xtable(round(ubxiiarma_coeff,4))
-xtable::xtable(round(arima_coeff,4))
+(round(barmax_coeff,4))
+(round(karmax_coeff,4))
+(round(uwarmax_coeff,4))
+(round(ubxiiarmax_coeff,4))
+(round(sarimax_coeff[,c(7,1:6)],2))
+(round(arimax_coeff[,c(5,1:4)],4))
+(round(barma_coeff,4))
+(round(karma_coeff,4))
+(round(uwarma_coeff, 4))
+(round(ubxiiarma_coeff,4))
+(round(sarima_coeff,2))
+(round(arima_coeff,4))
 
 # Box.test BARMA
 Box.test(barmax$residuals, lag=20, fitdf = sum(orbarmax))
@@ -193,63 +196,19 @@ Box.test(uwarma$residuals, lag=20, fitdf = sum(oruwarma))
 # Box.test UBXII-ARMA
 Box.test(ubxiiarma$residuals, lag=20, fitdf = 3)
 # Box.test ARIMA
-Box.test(a01$residuals, lag=20, fitdf = 4)
+Box.test(s01$residuals, lag=20, fitdf = 4)
 
-# w1=4.5
-# h11=4
-# setEPS()
-# postscript("acf_beta.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# acf(barmax$residuals, main ="")
-# dev.off()
-# 
-# postscript("pacf_beta.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# pacf(barmax$residuals, main ="")
-# dev.off()
-# 
-# postscript("acf_KW.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# acf(karmax$residuals, main ="")
-# dev.off()
-# 
-# postscript("pacf_KW.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# pacf(karmax$residuals, main ="")
-# dev.off()
-# 
-# 
-# postscript("acf_UW.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# acf(uwarmax$residuals, main ="")
-# dev.off()
-# 
-# postscript("pacf_UW.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# pacf(uwarmax$residuals, main ="")
-# dev.off()
-# 
-# postscript("acf_ubxii.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# acf(ubxiiarmax$residuals, main ="")
-# dev.off()
-# 
-# postscript("pacf_ubxii.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# pacf(ubxiiarmax$residuals, main ="")
-# dev.off()
-# 
-# postscript("acf_arima.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# acf(a02$residuals, main ="")
-# dev.off()
-# 
-# postscript("pacf_arima.eps",width = w1, height = h11,family = "Times")
-# par(mar = c(4.1, 4.1, 1, 1))
-# pacf(a02$residuals, main ="")
-# dev.off()
-
-
+# ACF and PACF of the residuals
+acf(barmax$residuals, main ="")
+pacf(barmax$residuals, main ="")
+acf(karmax$residuals, main ="")
+pacf(karmax$residuals, main ="")
+acf(uwarmax$residuals, main ="")
+pacf(uwarmax$residuals, main ="")
+acf(ubxiiarmax$residuals, main ="")
+pacf(ubxiiarmax$residuals, main ="")
+acf(a02$residuals, main ="")
+pacf(a02$residuals, main ="")
 
 barmax_out<-BARFIMA.extract(yt=hum, xreg = X0,  
                             coefs = list(alpha = barmax$coefficients[1], 
@@ -276,12 +235,12 @@ uwarmax_out<-UWARFIMA.extract(yt=hum,xreg = X0,rho=quant,
                                            nu = uwarmax$coefficients[(oruwarmax[1]+nX+2+oruwarmax[2])])
 )
 ubxiiarmax_out<-UWARFIMA.extract(yt=hum,xreg = X0,rho=quant,  
-                              coefs = list(alpha = ubxiiarmax$alpha,
-                                           beta = ubxiiarmax$beta,
-                                           phi= ubxiiarmax$phi,
-                                           theta = if(orbxiiarmax[2]==0) {NULL} else{
-                                             ubxiiarmax$theta},
-                                           nu = ubxiiarmax$c_par)
+                                 coefs = list(alpha = ubxiiarmax$alpha,
+                                              beta = ubxiiarmax$beta,
+                                              phi= ubxiiarmax$phi,
+                                              theta = if(orbxiiarmax[2]==0) {NULL} else{
+                                                ubxiiarmax$theta},
+                                              nu = ubxiiarmax$c_par)
 )
 barma_out<-BARFIMA.extract(yt=hum,
                            coefs = list(alpha = barma$coefficients[1], 
@@ -307,10 +266,10 @@ uwarma_out<-UWARFIMA.extract(yt=hum,
 )
 
 ubxiiarma_out<-UWARFIMA.extract(yt=hum,
-                             coefs = list(alpha = ubxiiarma$alpha, 
-                                          phi= ubxiiarma$phi,
-                                          theta = ubxiiarma$theta,
-                                          nu = ubxiiarma$c_par)
+                                coefs = list(alpha = ubxiiarma$alpha, 
+                                             phi= ubxiiarma$phi,
+                                             theta = ubxiiarma$theta,
+                                             nu = ubxiiarma$c_par)
 )
 
 results_outsample<-rbind(
@@ -323,84 +282,97 @@ results_outsample<-rbind(
   forecast::accuracy(karma_out$mut[(n+1):(dim(data)[1])], hum_test),
   forecast::accuracy(uwarma_out$mut[(n+1):(dim(data)[1])], hum_test),
   forecast::accuracy(ubxiiarma_out$mut[(n+1):(dim(data)[1])], hum_test),
-  forecast::accuracy(new1$fitted, hum_test)
+  forecast::accuracy(snew1$fitted, hum_test)
 )[,c(3,2,5)]
 
 row.names(results_outsample)<-
   names_rows
 
-# xtable::xtable((results_outsample),digits=4)
+# Round results
+rounded_result <- round(results_outsample, 4)
 
-# round(results_insample[,],5)
-round(results_outsample[,],5)
+# Percentage differences
+df_percent_diff <- sweep(
+  sweep(rounded_result, 2, rounded_result[3, ], FUN = "-"),
+  2,
+  rounded_result[3, ],
+  FUN = "/"
+)[-3, ] * 100
 
-df_percent_diff<-sweep(sweep(results_outsample, 2, results_outsample[3, ], FUN = "-"),  
-                       2, results_outsample[3, ], FUN = "/")*100
-
-df<-data.frame(values=as.vector(df_percent_diff),
-               model=rep(names_rows,3),
-               measure=rep(c("MAE","MAPE","RMSE"),10)
+# Data frame
+df <- data.frame(
+  values = as.vector(df_percent_diff),
+  model = rep(names_rows[-3], 3),
+  measure = c(rep("MAE", 9), rep("MAPE", 9), rep("RMSE", 9))
 )
-# w1=4.5
-# h11=4
-# setEPS()
-# postscript("comparision1.eps",width = w1, height = h11,family = "Times")
-ggplot(df,
-       aes(y=values,x=measure,
-           fill=factor(model))
-)+
-  geom_bar(stat="identity",position = "dodge", width = .9) +
-  labs(fill="",y="Percentage differences",x="") +
-  scale_fill_manual(values=gray.colors(9))+
-  ylim(-1,480)+
-  geom_text(aes(x=measure,y=values,
-                label=round(values,2)),
-            fontface="bold",
-            hjust= 0,
-            vjust = ifelse(df$values >= 0, -0.3, -.9),  # Ajusta a posição vertical dos números para ficarem acima da barra
-            angle=55,
-            position = position_dodge(width = .9),
-            color="black",
-            size=2)+
-  theme(legend.position = "bottom",
-        strip.text = element_text(face="bold",size=8),
-        plot.title = element_text(face="bold",size=8),
-        legend.text = element_text(face="bold",size=8),
-        legend.key.size = unit(0.3, "cm"),  # Ajusta o tamanho dos quadrados na legenda
-        legend.spacing.x = unit(0.3, 'cm'),  # Espaçamento entre os itens da legenda
-        legend.margin = margin(t = -13, unit = "pt"),
-        axis.title.y = element_text(face="bold", color="black",
-                                    size=8),
-        axis.title.x = element_text(face="bold", color="black",
-                                    size=8),
-        axis.text.x = element_text(face="bold", color="black",
-                                   size=8),
-        axis.text.y = element_text(face="bold", color="black",
-                                   size=8),
-        panel.background = element_rect(fill = "white", colour = "white"))
 
-# dev.off()
+model_order <- c("SARIMA", "ARIMAX","BARMA", "BARMAX",
+                 "KARMA", "KARMAX","UBXII-ARMA", "UBXII-ARMAX", "UWARMA")
 
-# hum1=xts::xts(hum_test, order.by=data$timestamp[(n+1):(dim(data)[1])])
-# hum2<-xts::xts(new2$fitted, order.by=data$timestamp[(n+1):(dim(data)[1])])#
-# hum3<-xts::xts(uwarmax_out$mut[(n+1):(dim(data)[1])], order.by=data$timestamp[(n+1):(dim(data)[1])])
+df$model <- factor(df$model, levels = model_order)
+
+
+w1=4.5
+h11=4
+setEPS()
+postscript("comparision1.eps",width = w1, height = h11,family = "Times")
+ggplot(df, aes(y = values, x = measure, fill = factor(model))) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.9) +
+  labs(fill = "", y = "Percentage differences", x = "") +
+  scale_fill_manual(
+    values = colors,
+    labels = c("SARIMA", "ARIMAX",expression(bold(beta * ARMA)),
+               expression(bold(beta * ARMAX)),
+               "KARMA", "KARMAX","UBXII-ARMA", "UBXII-ARMAX", "UWARMA"),
+    guide = guide_legend(nrow = 2, byrow = TRUE)
+  ) +
+  ylim(-1, 490) +
+  geom_text(
+    aes(x = measure, y = values, label = round(values, 2)),
+    fontface = "bold",
+    hjust = 0,
+    vjust = ifelse(df$values >= 0, -0.3, -0.9),
+    angle = 55,
+    position = position_dodge(width = 0.9),
+    color = "black",
+    size = 2
+  ) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 8),
+    plot.title = element_text(face = "bold", size = 8),
+    legend.text = element_text(face = "bold", size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.spacing.x = unit(0.3, "cm"),
+    legend.margin = margin(t = -13, l = -30, unit = "pt"),
+    axis.title.y = element_text(face = "bold", color = "black", size = 8),
+    axis.title.x = element_text(face = "bold", color = "black", size = 8),
+    axis.text.x = element_text(face = "bold", color = "black", size = 8),
+    axis.text.y = element_text(face = "bold", color = "black", size = 8),
+    panel.background = element_rect(fill = "white", colour = "white")
+  )
+dev.off()
+
+hum1=xts::xts(hum_test, order.by=data$timestamp[(n+1):(dim(data)[1])])
+hum2<-xts::xts(new2$fitted, order.by=data$timestamp[(n+1):(dim(data)[1])])#
+hum3<-xts::xts(uwarmax_out$mut[(n+1):(dim(data)[1])], order.by=data$timestamp[(n+1):(dim(data)[1])])
 # w1=4.5
 # h11=2.5
 # setEPS()
 # postscript("comparision2.eps",width = w1, height = h11,family = "Times")
-# plot(hum1,
-#      main="", yaxis.right=FALSE, grid.col = "white",
-#      format.labels="%b-%Y", main.timespan = FALSE,
-#      lwd=.5,
-#      ylim=c(min(hum1,hum2,hum3),
-#             max(hum1,hum2,hum3)+.1)
-# )
-# lines(hum2,lty=2,lwd=1,col=2)
-# lines(hum3,lwd=.5,col=4)
-# xts::addLegend("topleft",
-#                legend.names =c("Original data","ARIMAX","UWARMAX"),
-#                col=c(1,2,4), cex=.8,lty=c(1,2,1),
-#                lwd=c(.5,1,.5),
-#                ncol=3
-# )
+plot(hum1,
+     main="", yaxis.right=FALSE, grid.col = "white",
+     format.labels="%b-%Y", main.timespan = FALSE,
+     lwd=.5,
+     ylim=c(min(hum1,hum2,hum3),
+            max(hum1,hum2,hum3)+.1)
+)
+lines(hum2,lty=2,lwd=1,col=2)
+lines(hum3,lwd=.5,col=4)
+xts::addLegend("topleft",
+               legend.names =c("Original data","ARIMAX","UWARMAX"),
+               col=c(1,2,4), cex=.8,lty=c(1,2,1),
+               lwd=c(.5,1,.5),
+               ncol=3
+)
 # dev.off()
