@@ -1,8 +1,8 @@
 library(forecast)
 library(ggplot2)
 library(BTSR)
-source("ubxiiarma.fit.r")
-source("best.ubxiiarma.r")
+source("ubxiiarma.fit.r") # from https://github.com/tatianefribeiro/ubxiiarma/blob/main/ubxiiarma.fit.r
+source("best.ubxiiarma.r") # from https://github.com/tatianefribeiro/ubxiiarma/blob/main/best.ubxiiarma.r
 ######################
 ## Data preparation ##
 ######################
@@ -312,10 +312,16 @@ model_order <- c("SARIMA", "ARIMAX","BARMA", "BARMAX",
 df$model <- factor(df$model, levels = model_order)
 
 
-w1=4.5
-h11=4
-setEPS()
-postscript("comparision1.eps",width = w1, height = h11,family = "Times")
+# Colors
+colors <- c(
+  "#00008B", "gray20", "#2B36F8", "grey45", "#566CF2",
+  "grey65", "#81A2EC", "grey80", "#ADD8E6"
+)
+
+# w1=4.5
+# h11=4
+# setEPS()
+# postscript("comparision1.eps",width = w1, height = h11,family = "Times")
 ggplot(df, aes(y = values, x = measure, fill = factor(model))) +
   geom_bar(stat = "identity", position = "dodge", width = 0.9) +
   labs(fill = "", y = "Percentage differences", x = "") +
@@ -351,7 +357,7 @@ ggplot(df, aes(y = values, x = measure, fill = factor(model))) +
     axis.text.y = element_text(face = "bold", color = "black", size = 8),
     panel.background = element_rect(fill = "white", colour = "white")
   )
-dev.off()
+# dev.off()
 
 hum1=xts::xts(hum_test, order.by=data$timestamp[(n+1):(dim(data)[1])])
 hum2<-xts::xts(new2$fitted, order.by=data$timestamp[(n+1):(dim(data)[1])])#
